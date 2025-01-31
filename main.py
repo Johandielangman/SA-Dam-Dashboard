@@ -10,11 +10,12 @@
 
 # =========== // STANDARD IMPORTS // ===========
 
+import time
 from urllib.parse import quote
 
 # =========== // CUSTOM IMPORTS // ===========
 
-from streamlit_folium import folium_static
+from streamlit_folium import st_folium
 import streamlit as st
 import pandas as pd
 import pymongo
@@ -23,6 +24,7 @@ import folium
 
 # =========== // CONSTANTS // ===========
 
+start_time = time.time()
 LOCAL: bool = False
 PALETTE = [
     "#e60000",
@@ -34,17 +36,19 @@ PALETTE = [
 
 TABLE_COLUMNS = {
     "dam": "Dam Name",
-    "this_week": "Percentage Filled",
     "province": "Province",
     "river": "River",
-    "full_storage_capacity": "FSC Million m³"
+    "full_storage_capacity": "FSC Million m³",
+    "this_week": "Pct Filled",
 }
 
 # =========== // MAIN PAGE SETUP // ===========
 
 st.set_page_config(
     page_title="Dam Dash",
-    page_icon="favicon.svg"
+    page_icon="favicon.svg",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
 if not LOCAL:
@@ -74,7 +78,6 @@ def get_color(value):
         return PALETTE[3]
     else:
         return PALETTE[4]
-
 
 # =========== // MONGO CONNECTION // ===========
 
@@ -119,7 +122,7 @@ def get_filter_options():
 # =========== // DATA FETCH // ===========
 
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl="30s")
 def get_data(report_date: list, province: list):
     query = {}
     if report_date != "All":
@@ -131,7 +134,7 @@ def get_data(report_date: list, province: list):
         filter=query,
         projection={
             k: 1 for k in TABLE_COLUMNS.keys()
-        } | {"lat_long": 1}
+        } | {"lat_long": 1, "last_week": 1}
     ))
 
     df = pd.DataFrame(items)
@@ -140,6 +143,20 @@ def get_data(report_date: list, province: list):
         inplace=True
     )
     df[TABLE_COLUMNS['full_storage_capacity']] = df[TABLE_COLUMNS['full_storage_capacity']] / 1e6
+
+    # Compute percentage change
+    df["Change"] = df.apply(
+        lambda row: (
+            f'🔼 {row["Pct Filled"] - row["last_week"]:.1f}%' if (
+                row["Pct Filled"] > row["last_week"]
+            ) else (
+                f'🔻 {row["Pct Filled"] - row["last_week"]:.1f}%'
+            ) if (
+                row["Pct Filled"] < row["last_week"]
+            )else '◼ 0%'
+        ), axis=1)
+    df.drop(columns=["last_week"], inplace=True)
+
     return df
 
 # =========== // FILTERS (in the sidebar) // ===========
@@ -160,26 +177,32 @@ province = st.sidebar.selectbox(
 display_date = pd.to_datetime(report_date).strftime("%d %B %Y") if report_date != "All" else "All Dates"
 
 # get the data!
-data = get_data(report_date, province)
+st.title("South Africa Dam Dashboard 💧")
+st.write(f"### Report Date: **{display_date}** 📆")
+st.write("**Welcome to the South African Dam Dashboard!** This dashboard provides weekly updates on dam levels across South Africa, with data sourced from the [Department of Water and Sanitation](https://www.dws.gov.za/hydrology/Weekly/Province.aspx). The information is presented in both a table and an interactive map. By default, the table is sorted by province and percentage filled. Filters are available in the sidebar, allowing you to refine the data by report date and province. By default, the latest available data is shown for all provinces. On the map, each dot represents a dam location. The color of the dot indicates the dam's water level (see the legend in the sidebar), while the dot's size reflects the dam's storage capacity—larger dots represent larger dams. The table also includes a **difference column**, comparing each dam's current percentage filled to the previous week's value, indicating whether the level has increased 🔼 or decreased 🔻. Feel free to download the data as a CSV.")
+
+with st.spinner('Fetching data...'):
+    data = get_data(report_date, province)
 
 # =========== // BUILD THE MAIN PAGE // ===========
 
-
-st.title("# SA Dam Dashboard 🌊")
-st.write(f"### {display_date} 📆")
-
-left_column, right_column = st.columns([2, 1])
+left_column, right_column = st.columns(
+    [1, 2],
+    gap="medium"
+)
 
 with left_column:
     st.write("#### Dam Levels Table 📊")
+    data.sort_values(by=[TABLE_COLUMNS['province'], TABLE_COLUMNS['this_week']], ascending=[True, False], inplace=True)
     st.dataframe(
-        data[list(TABLE_COLUMNS.values())],
+        data[list(TABLE_COLUMNS.values()) + ["Change"]],
         hide_index=True
     )
+    st.write("[![BuyMeACoffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/johanlangman)")
+
 
 with right_column:
     st.write("#### Dam Levels Map 🌍")
-
     min_size, max_size = 6, 15
     min_fsc, max_fsc = data[TABLE_COLUMNS['full_storage_capacity']].min(), data[TABLE_COLUMNS['full_storage_capacity']].max()
 
@@ -208,7 +231,7 @@ with right_column:
             popup=f"{row[TABLE_COLUMNS['dam']]} ({row[TABLE_COLUMNS['this_week']]}%)"
         ).add_to(m)
 
-    folium_static(m)
+    st_folium(m, height=500, use_container_width=True, returned_objects=[])
 
 # =========== // LEGEND (sidebar) // ===========
 
@@ -220,3 +243,14 @@ st.sidebar.markdown(f"""
 - <span style='color:{PALETTE[3]};'>● Moderately High (75-90)</span>
 - <span style='color:{PALETTE[4]};'>● High (90+)</span>
 """, unsafe_allow_html=True)
+
+
+# =========== // SORRY IT TOOK SO LONG // ===========
+if time.time() - start_time > 10:
+    msg = st.toast('Hi!', icon="🛑")
+    time.sleep(3)
+    msg.toast('If things feel slow...', icon="🛑")
+    time.sleep(3)
+    msg.toast('Remember that this is hosted on an old laptop!', icon="🛑")
+    time.sleep(3)
+    msg.toast('Thanks! And enjoy!', icon="🎉")
