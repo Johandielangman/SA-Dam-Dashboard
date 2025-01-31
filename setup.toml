@@ -1,0 +1,11 @@
+# https://toml.io/en/
+
+title = "Dam Dash"
+
+[owner]
+name = "Johan"
+
+[streamlit]
+port = 8003
+base_path = "/dam"
+entry_file="main.py"
