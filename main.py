@@ -4,18 +4,28 @@
 #      > ^ <
 #
 # Author: Johan Hanekom
-# Date: January 2025
+# Date: February 2025
 
 # ~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~
 
 # =========== // STANDARD IMPORTS // ===========
 
 import time
+import datetime
 from urllib.parse import quote
+from typing import (
+    Optional,
+    Union,
+    Tuple,
+    List,
+    Dict
+)
 
 # =========== // CUSTOM IMPORTS // ===========
 
+import pymongo.synchronous.collection
 from streamlit_folium import st_folium
+import pymongo.synchronous
 import streamlit as st
 import pandas as pd
 import pymongo
@@ -24,7 +34,7 @@ import folium
 
 # =========== // CONSTANTS // ===========
 
-start_time = time.time()
+start_time = time.time()  # to check if the script is taking long
 LOCAL: bool = False
 PALETTE = [
     "#e60000",
@@ -51,8 +61,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Removes the "Deploy" and menu button
+# This was suggested on a forum, although I heard from a friend
+# that this could have been done in a config file
 if not LOCAL:
-    hide_streamlit_style = """
+    hide_streamlit_style: str = """
         <style>
             #MainMenu {visibility: hidden;}
             .stAppDeployButton {display:none;}
@@ -67,7 +80,9 @@ if not LOCAL:
 # =========== // HELPER FUNCTIONS // ===========
 
 
-def get_color(value):
+def get_color(
+    value: Union[int, float]
+) -> str:
     if value < 25:
         return PALETTE[0]
     elif value < 50:
@@ -83,7 +98,7 @@ def get_color(value):
 
 
 @st.cache_resource(ttl='30s')
-def init_connection():
+def init_connection() -> pymongo.MongoClient:
     return pymongo.MongoClient(
         f"mongodb+srv://"
         f"{quote(st.secrets['mongo']['username'], safe='')}:"
@@ -97,8 +112,8 @@ client: pymongo.MongoClient = init_connection()
 # =========== // GET FILTER OPTIONS // ===========
 
 
-def get_latest_report_date():
-    latest_date = client['dam-dash']['reports'].find_one(
+def get_latest_report_date() -> Optional[datetime.datetime]:
+    latest_date: datetime.datetime = client['dam-dash']['reports'].find_one(
         sort=[("report_date", -1)],
         projection={"report_date": 1}
     )
@@ -107,14 +122,14 @@ def get_latest_report_date():
     ) else None
 
 
-@st.cache_data(ttl=600)
-def get_filter_options():
-    reports = client['dam-dash']['reports']
-    report_dates = sorted(
+@st.cache_data(ttl="600s")
+def get_filter_options() -> Tuple[List[datetime.datetime], List[str]]:
+    reports: pymongo.synchronous.collection.Collection = client['dam-dash']['reports']
+    report_dates: List[datetime.datetime] = sorted(
         reports.distinct("report_date"),
         reverse=True
     )
-    provinces = sorted(
+    provinces: List[str] = sorted(
         reports.distinct("province")
     )
     return report_dates, provinces
@@ -122,22 +137,25 @@ def get_filter_options():
 # =========== // DATA FETCH // ===========
 
 
-@st.cache_data(ttl="30s")
-def get_data(report_date: list, province: list):
-    query = {}
+@st.cache_data(ttl="20s")
+def get_data(
+    report_date: datetime.datetime,
+    province: str
+) -> pd.DataFrame:
+    query: Dict[str, Union[datetime.datetime, str]] = {}
     if report_date != "All":
         query["report_date"] = report_date
     if province != "All":
         query["province"] = province
 
-    items = list(client['dam-dash']['reports'].find(
+    items: List[Dict] = list(client['dam-dash']['reports'].find(
         filter=query,
         projection={
             k: 1 for k in TABLE_COLUMNS.keys()
         } | {"lat_long": 1, "last_week": 1}
     ))
 
-    df = pd.DataFrame(items)
+    df: pd.DataFrame = pd.DataFrame(items)
     df.rename(
         columns=TABLE_COLUMNS,
         inplace=True
@@ -155,7 +173,12 @@ def get_data(report_date: list, province: list):
                 row["Pct Filled"] < row["last_week"]
             )else '◼ 0%'
         ), axis=1)
-    df.drop(columns=["last_week"], inplace=True)
+
+    # No longer needed
+    df.drop(
+        columns=["last_week"],
+        inplace=True
+    )
 
     return df
 
@@ -163,26 +186,33 @@ def get_data(report_date: list, province: list):
 
 
 report_dates, provinces = get_filter_options()
-report_date = st.sidebar.selectbox(
+report_date: datetime.datetime = st.sidebar.selectbox(
     label="Select Report Date",
     options=["All"] + report_dates,
     index=1 if get_latest_report_date() in report_dates else 0
 )
 
-province = st.sidebar.selectbox(
+province: str = st.sidebar.selectbox(
     label="Select Province",
     options=["All"] + provinces
 )
 
-display_date = pd.to_datetime(report_date).strftime("%d %B %Y") if report_date != "All" else "All Dates"
+display_date: str = pd.to_datetime(
+    report_date
+).strftime("%d %B %Y") if (
+    report_date != "All"
+) else "All Dates"
 
-# get the data!
+# The landing text
 st.title("South Africa Dam Dashboard 💧")
 st.write(f"### Report Date: **{display_date}** 📆")
 st.write("**Welcome to the South African Dam Dashboard!** This dashboard provides weekly updates on dam levels across South Africa, with data sourced from the [Department of Water and Sanitation](https://www.dws.gov.za/hydrology/Weekly/Province.aspx). The information is presented in both a table and an interactive map. By default, the table is sorted by province and percentage filled. Filters are available in the sidebar, allowing you to refine the data by report date and province. By default, the latest available data is shown for all provinces. On the map, each dot represents a dam location. The color of the dot indicates the dam's water level (see the legend in the sidebar), while the dot's size reflects the dam's storage capacity—larger dots represent larger dams. The table also includes a **difference column**, comparing each dam's current percentage filled to the previous week's value, indicating whether the level has increased 🔼 or decreased 🔻. Feel free to download the data as a CSV.")
 
 with st.spinner('Fetching data...'):
-    data = get_data(report_date, province)
+    data: pd.DataFrame = get_data(
+        report_date=report_date,
+        province=province
+    )
 
 # =========== // BUILD THE MAIN PAGE // ===========
 
@@ -191,25 +221,41 @@ left_column, right_column = st.columns(
     gap="medium"
 )
 
+# >>>>>>>>>>>>>>>>>>>>> LEFT COLUMN
 with left_column:
     st.write("#### Dam Levels Table 📊")
-    data.sort_values(by=[TABLE_COLUMNS['province'], TABLE_COLUMNS['this_week']], ascending=[True, False], inplace=True)
+    data.sort_values(
+        by=[
+            TABLE_COLUMNS['province'],
+            TABLE_COLUMNS['this_week']
+        ],
+        ascending=[True, False],
+        inplace=True
+    )
+
     st.dataframe(
         data[list(TABLE_COLUMNS.values()) + ["Change"]],
         hide_index=True
     )
+
+    # Shameless plug
     st.write("[![BuyMeACoffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/johanlangman)")
 
 
+# >>>>>>>>>>>>>>>>>>>>> RIGHT COLUMN
 with right_column:
     st.write("#### Dam Levels Map 🌍")
+
+    # =========== // NORMALIZE THE DOT SIZE // ===========
+
     min_size, max_size = 6, 15
     min_fsc, max_fsc = data[TABLE_COLUMNS['full_storage_capacity']].min(), data[TABLE_COLUMNS['full_storage_capacity']].max()
 
     def get_marker_size(fsc):
         return min_size + (max_size - min_size) * ((fsc - min_fsc) / (max_fsc - min_fsc) if max_fsc > min_fsc else 0)
 
-    # Create folium map
+    # =========== // CREATE A FOLIUM MAP CLASS // ===========
+
     m = folium.Map(
         location=[-28, 24],
         zoom_start=6,
@@ -219,6 +265,8 @@ with right_column:
         [-35, 16.5],
         [-22, 33]
     ])
+
+    # =========== // ADD CIRCLES TO THE MAP // ===========
 
     for _, row in data.iterrows():
         folium.CircleMarker(
@@ -231,10 +279,18 @@ with right_column:
             popup=f"{row[TABLE_COLUMNS['dam']]} ({row[TABLE_COLUMNS['this_week']]}%)"
         ).add_to(m)
 
-    st_folium(m, height=500, use_container_width=True, returned_objects=[])
+    # =========== // INITIALIZE THE MAP ON STREAMLIT // ===========
+
+    st_folium(
+        m,
+        height=500,
+        use_container_width=True,
+        returned_objects=[]  # IMPORTANT! Make it a static plot. Don't want callbacks
+    )
 
 # =========== // LEGEND (sidebar) // ===========
 
+# You can inject HTML?!
 st.sidebar.markdown(f"""
 ### Legend
 - <span style='color:{PALETTE[0]};'>● Very Low (0-25)</span>
@@ -245,8 +301,10 @@ st.sidebar.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# =========== // SORRY IT TOOK SO LONG // ===========
-if time.time() - start_time > 10:
+# =========== // SORRY IF IT TOOK SO LONG // ===========
+# I have slow laptop!
+
+if time.time() - start_time > 10.0:
     msg = st.toast('Hi!', icon="🛑")
     time.sleep(3)
     msg.toast('If things feel slow...', icon="🛑")
