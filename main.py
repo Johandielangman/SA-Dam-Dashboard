@@ -145,6 +145,9 @@ def get_data(
     query: Dict[str, Union[datetime.datetime, str]] = {}
     if report_date != "All":
         query["report_date"] = report_date
+    else:
+        TABLE_COLUMNS.update({"report_date": "Date"})
+
     if province != "All":
         query["province"] = province
 
@@ -246,47 +249,50 @@ with left_column:
 with right_column:
     st.write("#### Dam Levels Map 🌍")
 
-    # =========== // NORMALIZE THE DOT SIZE // ===========
+    if report_date == "All":
+        st.warning('Since you selected all historic Dam Data, the map is disabled. A date column is added to the table.', icon="ℹ️")
+    else:
+        # =========== // NORMALIZE THE DOT SIZE // ===========
 
-    min_size, max_size = 6, 15
-    min_fsc, max_fsc = data[TABLE_COLUMNS['full_storage_capacity']].min(), data[TABLE_COLUMNS['full_storage_capacity']].max()
+        min_size, max_size = 6, 15
+        min_fsc, max_fsc = data[TABLE_COLUMNS['full_storage_capacity']].min(), data[TABLE_COLUMNS['full_storage_capacity']].max()
 
-    def get_marker_size(fsc):
-        return min_size + (max_size - min_size) * ((fsc - min_fsc) / (max_fsc - min_fsc) if max_fsc > min_fsc else 0)
+        def get_marker_size(fsc):
+            return min_size + (max_size - min_size) * ((fsc - min_fsc) / (max_fsc - min_fsc) if max_fsc > min_fsc else 0)
 
-    # =========== // CREATE A FOLIUM MAP CLASS // ===========
+        # =========== // CREATE A FOLIUM MAP CLASS // ===========
 
-    m = folium.Map(
-        location=[-28, 24],
-        zoom_start=6,
-        tiles='OpenStreetMap'
-    )
-    m.fit_bounds([
-        [-35, 16.5],
-        [-22, 33]
-    ])
+        m = folium.Map(
+            location=[-28, 24],
+            zoom_start=6,
+            tiles='OpenStreetMap'
+        )
+        m.fit_bounds([
+            [-35, 16.5],
+            [-22, 33]
+        ])
 
-    # =========== // ADD CIRCLES TO THE MAP // ===========
+        # =========== // ADD CIRCLES TO THE MAP // ===========
 
-    for _, row in data.iterrows():
-        folium.CircleMarker(
-            location=row["lat_long"],
-            radius=get_marker_size(row[TABLE_COLUMNS['full_storage_capacity']]),
-            color=get_color(row[TABLE_COLUMNS['this_week']]),
-            fill=True,
-            fill_color=get_color(row[TABLE_COLUMNS['this_week']]),
-            fill_opacity=0.8,
-            popup=f"{row[TABLE_COLUMNS['dam']]} ({row[TABLE_COLUMNS['this_week']]}%)"
-        ).add_to(m)
+        for _, row in data.iterrows():
+            folium.CircleMarker(
+                location=row["lat_long"],
+                radius=get_marker_size(row[TABLE_COLUMNS['full_storage_capacity']]),
+                color=get_color(row[TABLE_COLUMNS['this_week']]),
+                fill=True,
+                fill_color=get_color(row[TABLE_COLUMNS['this_week']]),
+                fill_opacity=0.8,
+                popup=f"{row[TABLE_COLUMNS['dam']]} ({row[TABLE_COLUMNS['this_week']]}%)"
+            ).add_to(m)
 
-    # =========== // INITIALIZE THE MAP ON STREAMLIT // ===========
+        # =========== // INITIALIZE THE MAP ON STREAMLIT // ===========
 
-    st_folium(
-        m,
-        height=500,
-        use_container_width=True,
-        returned_objects=[]  # IMPORTANT! Make it a static plot. Don't want callbacks
-    )
+        st_folium(
+            m,
+            height=500,
+            use_container_width=True,
+            returned_objects=[]  # IMPORTANT! Make it a static plot. Don't want callbacks
+        )
 
 # =========== // LEGEND (sidebar) // ===========
 
