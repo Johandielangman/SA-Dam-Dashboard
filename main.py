@@ -240,6 +240,7 @@ with left_column:
         data[list(TABLE_COLUMNS.values()) + ["Change"]],
         hide_index=True
     )
+    st.write(f"Reporting {len(data)} dams!")
 
     # Shameless plug
     st.write("[![BuyMeACoffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/johanlangman)")
@@ -273,8 +274,15 @@ with right_column:
         ])
 
         # =========== // ADD CIRCLES TO THE MAP // ===========
-
+        missing_dams: int = 0
         for _, row in data.iterrows():
+            if (
+                not all([loc for loc in row["lat_long"]]) or
+                not isinstance(row["lat_long"], list) or
+                len(row["lat_long"]) != 2
+            ):
+                missing_dams += 1
+                continue
             folium.CircleMarker(
                 location=row["lat_long"],
                 radius=get_marker_size(row[TABLE_COLUMNS['full_storage_capacity']]),
@@ -293,6 +301,9 @@ with right_column:
             use_container_width=True,
             returned_objects=[]  # IMPORTANT! Make it a static plot. Don't want callbacks
         )
+
+        if missing_dams:
+            st.warning(f"{missing_dams} dams are missing location data and could not be plotted on the map. This could mean that new dams have been added to DWS. We'll get the location data as soon as possible! Hang tight!", icon="⚠️")
 
 # =========== // LEGEND (sidebar) // ===========
 
